@@ -14,24 +14,57 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748b; }
 
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes zoomIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-        @keyframes slideInRight { from { transform: translateX(20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        @keyframes pulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } 50% { box-shadow: 0 0 15px 5px rgba(239, 68, 68, 0.3); } }
+        @keyframes pulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } 50% { box-shadow: 0 0 20px 5px rgba(239, 68, 68, 0.4); } }
         @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
         @keyframes progress { from { width: 0%; } to { width: 100%; } }
 
-        .animate-fade-in { animation: fadeIn 0.2s ease-out forwards; }
-        .animate-zoom-in { animation: zoomIn 0.2s ease-out forwards; }
-        .animate-slide-in { animation: slideInRight 0.3s ease-out forwards; }
         .animate-pulse-red { animation: pulseRed 2s infinite; }
         .animate-shake { animation: shake 0.3s ease-in-out; }
         .animate-progress { animation: progress 7s linear forwards; }
+
+        .view-section {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(0.98);
+            z-index: 10;
+        }
+
+        .view-section.active {
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1);
+            position: relative;
+        }
+
+        .modal-overlay {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+        .modal-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            transform: scale(0.95);
+            transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        .modal-overlay.open .modal-content {
+            transform: scale(1);
+        }
 
         body {
             font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             -webkit-user-select: none;
             user-select: none;
+            overflow-x: hidden;
         }
     </style>
     
@@ -47,678 +80,156 @@
         }
     </script>
 </head>
-<body class="bg-slate-950 text-white min-h-screen">
+<body class="bg-slate-950 text-white min-h-screen relative">
 
-    <div id="app" class="min-h-screen flex flex-col"></div>
+    <!-- ================= VIEW: SETUP ================= -->
+    <div id="view-setup" class="view-section active flex flex-col items-center justify-center p-6 min-h-screen">
+        <div class="absolute top-4 right-4">
+            <button onclick="toggleModal('rules', true)" class="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-full text-sm font-semibold text-green-400 border border-green-500/30 transition-all">
+                <i data-lucide="book-open" class="w-4 h-4"></i> Regras
+            </button>
+        </div>
 
-    <script>
-        // --- CONFIGURAÇÃO ---
-        const ALL_COLORS = [
-            { name: 'Vermelho', hex: '#ef4444' },
-            { name: 'Azul', hex: '#3b82f6' },
-            { name: 'Verde', hex: '#22c55e' },
-            { name: 'Amarelo', hex: '#eab308' },
-            { name: 'Roxo', hex: '#a855f7' },
-            { name: 'Rosa', hex: '#ec4899' },
-            { name: 'Laranja', hex: '#f97316' },
-            { name: 'Ciano', hex: '#06b6d4' },
-            { name: 'Cinza', hex: '#64748b' },
-            { name: 'Índigo', hex: '#6366f1' },
-        ];
-        const VALUES_OPTIONS = [5, 10, 15, 20, 25];
-
-        // --- ESTADO ---
-        const state = {
-            view: 'SETUP',
-            players: [],
-            newPlayerName: '',
-            selectedColor: null,
-            startTime: null,
-            endTime: null,
-            gameDuration: 0,
-            activeRulesTab: 'overview',
-            attackMode: false,
-            modals: {
-                rules: false,
-                confirmEnd: false,
-                longPress: { visible: false, playerId: null, type: null, x: 0, y: 0 },
-                attack: { visible: false, targetId: null, baseDamage: 10, hasDefense: false },
-                attackResult: { visible: false, message: '', type: '', base: 0, actual: 0, targetName: '', hasDefense: false } // hasDefense adicionado
-            }
-        };
-
-        let gameTimerInterval = null;
-        let longPressTimer = null;
-        let resultAutoCloseTimer = null;
-        let isLongPress = false;
-
-        // --- LÓGICA DO JOGO ---
-
-        function init() {
-            autoSelectColor();
-            render();
-        }
-
-        function autoSelectColor() {
-            const usedColors = state.players.map(p => p.color.name);
-            const available = ALL_COLORS.filter(c => !usedColors.includes(c.name));
-            
-            if (!state.selectedColor || usedColors.includes(state.selectedColor.name)) {
-                if (available.length > 0) state.selectedColor = available[0];
-            }
-        }
-
-        function getAvailableColors() {
-            return ALL_COLORS.filter(c => 
-                !state.players.some(p => p.color.name === c.name) || (state.selectedColor && c.name === state.selectedColor.name)
-            );
-        }
-
-        function addPlayer(e) {
-            e.preventDefault();
-            let finalName = state.newPlayerName.trim();
-            if (!finalName) {
-                finalName = `Player ${state.players.length + 1}`;
-            }
-
-            if (!state.selectedColor) autoSelectColor();
-
-            const newPlayer = {
-                id: Date.now(),
-                name: finalName,
-                color: state.selectedColor,
-                score: 100,
-                status: 'ACTIVE',
-                survivalTime: null
-            };
-
-            state.players.push(newPlayer);
-            state.newPlayerName = '';
-            state.selectedColor = null; 
-            autoSelectColor();
-            render();
-        }
-
-        function removePlayer(id) {
-            state.players = state.players.filter(p => p.id !== id);
-            autoSelectColor();
-            render();
-        }
-
-        function startGame() {
-            if (state.players.length === 0) return;
-            state.startTime = Date.now();
-            state.view = 'PLAYING';
-            
-            if (gameTimerInterval) clearInterval(gameTimerInterval);
-            gameTimerInterval = setInterval(() => {
-                const timerEl = document.getElementById('game-timer-display');
-                if (timerEl) {
-                    timerEl.innerText = formatTime(Date.now() - state.startTime);
-                }
-            }, 1000);
-            render();
-        }
-
-        function finishGame() {
-            clearInterval(gameTimerInterval);
-            state.endTime = Date.now();
-            state.gameDuration = state.endTime - state.startTime;
-            state.players = state.players.map(p => {
-                if (p.status === 'ACTIVE') return { ...p, status: 'WINNER', survivalTime: state.gameDuration };
-                return p;
-            });
-            state.attackMode = false;
-            state.view = 'FINISHED';
-            state.modals.confirmEnd = false;
-            closeResultModal();
-            render();
-        }
-
-        function checkGameOver() {
-            const activePlayers = state.players.filter(p => p.status === 'ACTIVE');
-            if ((activePlayers.length <= 1 && state.players.length > 1) || (state.players.length === 1 && activePlayers.length === 0)) {
-                finishGame();
-                return true;
-            }
-            return false;
-        }
-
-        function updateScore(playerId, delta) {
-            const currentWaitTime = Date.now() - state.startTime;
-            state.players = state.players.map(player => {
-                if (player.id !== playerId || player.status !== 'ACTIVE') return player;
-                let newScore = player.score + delta;
-                let newStatus = player.status;
-                let survivalTime = player.survivalTime;
-                
-                if (newScore <= 0) {
-                    newScore = 0;
-                    newStatus = 'ELIMINATED';
-                    survivalTime = currentWaitTime;
-                }
-                return { ...player, score: newScore, status: newStatus, survivalTime };
-            });
-            
-            const isOver = checkGameOver();
-            if (isOver) {
-                state.attackMode = false;
-            }
-            render();
-        }
-
-        function resetGame() {
-            state.players = [];
-            state.view = 'SETUP';
-            state.startTime = null;
-            state.endTime = null;
-            state.activeRulesTab = 'overview';
-            state.selectedColor = null;
-            state.attackMode = false;
-            closeResultModal();
-            autoSelectColor();
-            render();
-        }
-
-        // --- LÓGICA DE ATAQUE ---
-        
-        function toggleAttackMode() {
-            state.attackMode = !state.attackMode;
-            render();
-        }
-
-        function openAttackModal(targetId) {
-            state.modals.attack = {
-                visible: true,
-                targetId: targetId,
-                baseDamage: 10,
-                hasDefense: false
-            };
-            render();
-        }
-
-        function executeAttack() {
-            const { targetId, baseDamage, hasDefense } = state.modals.attack;
-            const dmgInt = parseInt(baseDamage) || 0;
-            const result = calculateAttackDamage(dmgInt, hasDefense);
-
-            // Recupera nome do alvo para exibir no modal
-            const targetPlayer = state.players.find(p => p.id === targetId);
-            const targetName = targetPlayer ? targetPlayer.name : 'Desconhecido';
-
-            // Aplica o dano (negativo)
-            updateScore(targetId, -result.damage);
-            
-            // Fecha modal de input
-            state.modals.attack.visible = false;
-
-            // Abre modal de resultado
-            state.modals.attackResult = {
-                visible: true,
-                message: result.message,
-                type: result.type,
-                base: dmgInt,
-                actual: result.damage,
-                targetName: targetName,
-                hasDefense: hasDefense // Salva estado da defesa
-            };
-
-            // Timer de 7 segundos para fechar
-            if (resultAutoCloseTimer) clearTimeout(resultAutoCloseTimer);
-            resultAutoCloseTimer = setTimeout(() => {
-                closeResultModal();
-            }, 7000);
-
-            render();
-        }
-
-        function closeResultModal() {
-            state.modals.attackResult.visible = false;
-            if (resultAutoCloseTimer) clearTimeout(resultAutoCloseTimer);
-            render();
-        }
-
-        function calculateAttackDamage(baseDmg, hasDefense) {
-            const roll = Math.random() * 100;
-            
-            if (!hasDefense) {
-                // SEM DEFESA
-                if (roll < 10) {
-                    return { damage: 0, message: "Erro de Sintaxe: O malware falhou na execução!", type: 'info' };
-                } else {
-                    // Dano base com chance de leve aumento
-                    const multiplier = 1 + (Math.random() * 0.2); 
-                    const finalDmg = Math.ceil(baseDmg * multiplier);
-                    return { damage: finalDmg, message: "Ataque bem sucedido! Sistema comprometido.", type: 'danger' };
-                }
-            } else {
-                // COM DEFESA
-                if (roll < 50) {
-                    // 0 a 49.99
-                    return { damage: 0, message: "Analista percebeu o ataque em tempo!", type: 'success' };
-                } else if (roll < 80) {
-                    // 50 a 79.99
-                    const dmg = Math.ceil(baseDmg * 0.10);
-                    return { damage: dmg, message: "Dano superficial. Defesa absorveu o impacto.", type: 'warning' };
-                } else if (roll < 95) {
-                    // 80 a 94.99
-                    const dmg = Math.ceil(baseDmg * 0.35);
-                    return { damage: dmg, message: "Brecha parcial encontrada na defesa.", type: 'warning' };
-                } else {
-                    // 95 a 100
-                    const dmg = Math.ceil(baseDmg * 0.75);
-                    return { damage: dmg, message: "As defesas não estavam bem implementadas! :(", type: 'danger' };
-                }
-            }
-        }
-
-        // --- HANDLERS ---
-        function handleButtonDown(e, playerId, type) {
-            if(state.attackMode) return;
-            if(e.type === 'touchstart') e.stopPropagation();
-            isLongPress = false;
-            const rect = e.currentTarget.getBoundingClientRect();
-            
-            longPressTimer = setTimeout(() => {
-                isLongPress = true;
-                state.modals.longPress = { 
-                    visible: true, playerId, type, 
-                    x: rect.left + rect.width / 2, 
-                    y: rect.top 
-                };
-                render();
-            }, 500);
-        }
-
-        function handleButtonUp(playerId, type) {
-            if(state.attackMode) return;
-            if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
-            if (!isLongPress && !state.modals.longPress.visible) {
-                updateScore(playerId, type === 'add' ? 1 : -1);
-            }
-        }
-
-        function handlePlayerClick(playerId) {
-            if (!state.attackMode) return;
-            const player = state.players.find(p => p.id === playerId);
-            if (player.status === 'ELIMINATED') return;
-            openAttackModal(playerId);
-        }
-
-        function handleMenuSelect(value) {
-            const { playerId, type } = state.modals.longPress;
-            if (playerId && type) updateScore(playerId, type === 'add' ? value : -value);
-            state.modals.longPress = { visible: false, playerId: null, type: null, x: 0, y: 0 };
-            isLongPress = false;
-            render();
-        }
-
-        function formatTime(ms) {
-            if (!ms) return "00:00";
-            const totalSeconds = Math.floor(ms / 1000);
-            return `${Math.floor(totalSeconds / 60).toString().padStart(2, '0')}:${(totalSeconds % 60).toString().padStart(2, '0')}`;
-        }
-
-        function getLeaderId() {
-            if (state.players.length === 0) return null;
-            const active = state.players.filter(p => p.status === 'ACTIVE');
-            if (active.length === 0) return null;
-            return active.reduce((prev, curr) => (prev.score > curr.score) ? prev : curr).id;
-        }
-
-        // --- RENDERIZAÇÃO ---
-        function render() {
-            const app = document.getElementById('app');
-            let html = '';
-
-            if (state.view === 'SETUP') html = renderSetup();
-            else if (state.view === 'PLAYING') html = renderPlaying();
-            else if (state.view === 'FINISHED') html = renderFinished();
-
-            if (state.modals.rules) html += renderRulesModal();
-            if (state.modals.confirmEnd) html += renderConfirmModal();
-            if (state.modals.longPress.visible) html += renderLongPressMenu();
-            if (state.modals.attack.visible) html += renderAttackModal();
-            if (state.modals.attackResult.visible) html += renderResultModal();
-
-            app.innerHTML = html;
-            lucide.createIcons();
-
-            // Foco inputs
-            if (state.view === 'SETUP' && document.getElementById('input-name') && state.newPlayerName) {
-                const input = document.getElementById('input-name');
-                input.focus();
-                const len = input.value.length;
-                input.setSelectionRange(len, len);
-            }
-            if (state.modals.attack.visible && document.getElementById('attack-input')) {
-                document.getElementById('attack-input').focus();
-            }
-        }
-
-        // 1. SETUP SCREEN
-        function renderSetup() {
-            const availableColors = getAvailableColors();
-            return `
-            <div class="min-h-screen p-6 flex flex-col items-center justify-center font-sans relative animate-fade-in">
-                <div class="absolute top-4 right-4">
-                    <button onclick="state.modals.rules = true; render()" class="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-full text-sm font-semibold text-green-400 border border-green-500/30 transition-all">
-                        <i data-lucide="book-open" class="w-4 h-4"></i> Regras
-                    </button>
+        <div class="max-w-md w-full bg-slate-900 p-8 rounded-2xl shadow-2xl border border-slate-800">
+            <div class="flex flex-col items-center justify-center mb-8 gap-2">
+                <div class="bg-green-600/20 p-4 rounded-full border border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.3)]">
+                    <i data-lucide="shield" class="w-10 h-10 text-green-500"></i>
                 </div>
+                <h1 class="text-4xl font-black tracking-tighter text-white">Pwned<span class="text-green-500">!</span></h1>
+                <p class="text-slate-500 text-sm">Controle de Integridade</p>
+            </div>
 
-                <div class="max-w-md w-full bg-slate-900 p-8 rounded-2xl shadow-2xl border border-slate-800">
-                    <div class="flex flex-col items-center justify-center mb-8 gap-2">
-                        <div class="bg-green-600/20 p-4 rounded-full border border-green-500/30 shadow-[0_0_15px_rgba(34,197,94,0.3)]">
-                            <i data-lucide="shield" class="w-10 h-10 text-green-500"></i>
-                        </div>
-                        <h1 class="text-4xl font-black tracking-tighter text-white">Pwned<span class="text-green-500">!</span></h1>
-                        <p class="text-slate-500 text-sm">Controle de Integridade</p>
-                    </div>
-
-                    <form onsubmit="addPlayer(event)" class="space-y-4 mb-6">
-                        <div>
-                            <label class="block text-xs font-bold text-slate-400 mb-1 uppercase tracking-wider">Nome</label>
-                            <input id="input-name" type="text" value="${state.newPlayerName}" oninput="state.newPlayerName = this.value" placeholder="Ex: Player ${state.players.length + 1}"
-                                class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all text-white placeholder-slate-600 font-mono" maxlength="15" />
-                        </div>
-                        <div>
-                            <label class="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Cor</label>
-                            <div class="flex flex-wrap gap-2">
-                                ${availableColors.map(color => `
-                                    <button type="button" onclick='state.selectedColor = ${JSON.stringify(color)}; render()'
-                                        class="w-8 h-8 rounded-md border-2 transition-all duration-200 ${state.selectedColor && state.selectedColor.name === color.name ? 'border-white scale-110 shadow-[0_0_10px_rgba(255,255,255,0.3)] opacity-100' : 'border-transparent opacity-40 hover:opacity-100'}"
-                                        style="background-color: ${color.hex};"></button>
-                                `).join('')}
-                            </div>
-                        </div>
-                        <button type="submit" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-900/20 active:scale-95">
-                            <i data-lucide="plus" class="w-5 h-5"></i> Inserir Jogador
-                        </button>
-                    </form>
-
-                    ${state.players.length > 0 ? `
-                        <div class="mb-6">
-                            <h3 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider flex justify-between items-center">
-                                Jogadores <span class="bg-slate-800 px-2 py-0.5 rounded text-slate-300">${state.players.length}</span>
-                            </h3>
-                            <div class="space-y-2 max-h-52 overflow-y-auto pr-1 custom-scrollbar">
-                                ${state.players.map(p => `
-                                    <div class="flex items-center justify-between bg-slate-800/50 p-3 rounded-lg border border-slate-700/50 hover:border-slate-600 transition-colors group">
-                                        <div class="flex items-center gap-3">
-                                            <div class="w-3 h-3 rounded-full" style="background-color: ${p.color.hex}; box-shadow: 0 0 8px ${p.color.hex}"></div>
-                                            <span class="font-mono font-bold text-sm">${p.name}</span>
-                                        </div>
-                                        <button onclick="removePlayer(${p.id})" class="text-slate-600 group-hover:text-red-400 transition-colors"><i data-lucide="x" class="w-4 h-4"></i></button>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    ` : ''}
-
-                    <button onclick="startGame()" ${state.players.length === 0 ? 'disabled' : ''} class="w-full bg-slate-100 hover:bg-white text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed font-black py-4 rounded-xl shadow-lg transform transition active:scale-95 flex items-center justify-center gap-2 text-lg tracking-tight">
-                        <i data-lucide="play" class="w-6 h-6 fill-slate-900 text-slate-900"></i> INICIAR PROTOCOLO
-                    </button>
+            <form onsubmit="addPlayer(event)" class="space-y-4 mb-6">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-1 uppercase tracking-wider">Nome</label>
+                    <input id="input-name" type="text" placeholder="Ex: Player 1" maxlength="15"
+                        class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-green-500 transition-all text-white placeholder-slate-600 font-mono" />
                 </div>
-            </div>`;
-        }
-
-        // 2. PLAYING SCREEN
-        function renderPlaying() {
-            const leaderId = getLeaderId();
-            return `
-            <div class="min-h-screen p-3 flex flex-col relative overflow-hidden transition-colors duration-500 ${state.attackMode ? 'bg-red-950/30' : ''}" onmouseup="if(longPressTimer) clearTimeout(longPressTimer)" ontouchend="if(longPressTimer) clearTimeout(longPressTimer)">
-                
-                <!-- HEADER -->
-                <div class="flex justify-between items-center mb-4 bg-slate-900/90 backdrop-blur px-4 py-3 rounded-xl border border-slate-800 shadow-md sticky top-2 z-30">
-                    <div class="flex items-center gap-3">
-                        <h1 class="font-black text-xl tracking-tighter hidden sm:block">Pwned<span class="text-green-500">!</span></h1>
-                        <div class="flex items-center gap-2 text-slate-400 text-xs sm:text-sm font-mono">
-                            <i data-lucide="clock" class="w-4 h-4 animate-pulse text-green-500"></i>
-                            <span><span id="game-timer-display" class="text-slate-200">${formatTime(Date.now() - state.startTime)}</span></span>
-                        </div>
-                    </div>
-                    <div class="flex gap-2">
-                        <button onclick="toggleAttackMode()" class="p-2 rounded-lg transition-all border ${state.attackMode ? 'bg-red-600 text-white border-red-400 animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.5)]' : 'bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700'}">
-                            <i data-lucide="${state.attackMode ? 'skull' : 'bug'}" class="w-5 h-5"></i>
-                        </button>
-                        
-                        <div class="w-px h-8 bg-slate-700 mx-1"></div>
-
-                        <button onclick="state.modals.rules = true; render()" class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors"><i data-lucide="book-open" class="w-5 h-5"></i></button>
-                        <button onclick="state.modals.confirmEnd = true; render()" class="p-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 rounded-lg border border-red-900/30 transition-colors"><i data-lucide="power" class="w-5 h-5"></i></button>
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Cor</label>
+                    <div id="color-picker-container" class="flex flex-wrap gap-2">
+                        <!-- Cores geradas via JS -->
                     </div>
                 </div>
+                <button type="submit" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-lg transition-all flex items-center justify-center gap-2 shadow-lg shadow-green-900/20 active:scale-95">
+                    <i data-lucide="plus" class="w-5 h-5"></i> Inserir Jogador
+                </button>
+            </form>
 
-                <!-- AVISO MODO ATAQUE -->
-                ${state.attackMode ? `
-                    <div class="mb-4 text-center animate-shake">
-                        <span class="bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg border border-red-400 tracking-wider uppercase animate-pulse">
-                            Modo Ataque: Selecione um Alvo
-                        </span>
-                    </div>
-                ` : ''}
-
-                <!-- GRID PLAYERS -->
-                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 pb-20 auto-rows-fr">
-                    ${state.players.map(player => {
-                        const isLeader = player.id === leaderId;
-                        const isEliminated = player.status === 'ELIMINATED';
-                        
-                        let cardClass = "relative p-4 rounded-xl border-2 transition-all duration-300 flex flex-col justify-between ";
-                        if (isEliminated) {
-                            cardClass += "bg-slate-900/40 border-slate-800 opacity-50 ";
-                        } else if (state.attackMode) {
-                            cardClass += "bg-red-900/20 border-red-500/50 hover:bg-red-900/40 cursor-pointer hover:scale-[1.02] shadow-[0_0_15px_rgba(239,68,68,0.2)] animate-pulse-red ";
-                        } else {
-                            cardClass += "bg-slate-900 border-slate-700 ";
-                            if (isLeader) cardClass += "border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.15)] z-10 ";
-                        }
-
-                        return `
-                        <div class="${cardClass}" onclick="handlePlayerClick(${player.id})">
-                            ${isLeader && !isEliminated && !state.attackMode ? `<div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-yellow-500 text-slate-900 px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 shadow-lg uppercase tracking-wider"><i data-lucide="crown" class="w-3 h-3"></i> Líder</div>` : ''}
-                            ${state.attackMode && !isEliminated ? `<div class="absolute -top-3 left-1/2 -translate-x-1/2 bg-red-600 text-white px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 shadow-lg uppercase tracking-wider"><i data-lucide="crosshair" class="w-3 h-3"></i> ALVO</div>` : ''}
-                            
-                            ${isEliminated ? `<div class="absolute inset-0 flex items-center justify-center z-20 pointer-events-none"><div class="bg-red-900/90 text-red-100 px-3 py-1 rounded border border-red-500/50 rotate-[-10deg] shadow-xl text-sm font-black tracking-widest uppercase">Eliminado</div></div>` : ''}
-
-                            <div class="flex justify-between items-start mb-2 pointer-events-none">
-                                <div class="min-w-0">
-                                    <h2 class="text-sm font-bold truncate text-slate-200">${player.name}</h2>
-                                    <div class="flex items-center gap-1.5 mt-1">
-                                        <div class="w-2 h-2 rounded-full ${player.status === 'ACTIVE' ? 'animate-pulse' : ''}" style="background-color: ${player.color.hex}; box-shadow: ${player.status === 'ACTIVE' ? `0 0 5px ${player.color.hex}` : 'none'}"></div>
-                                        <span class="text-[10px] uppercase font-bold text-slate-500">${isEliminated ? 'Offline' : 'Online'}</span>
-                                    </div>
-                                </div>
-                                <div class="text-3xl font-black font-mono tracking-tighter leading-none ${isEliminated ? 'text-red-900' : 'text-white'}">${player.score}</div>
-                            </div>
-
-                            ${!state.attackMode ? `
-                                <div class="flex gap-2 mt-2 ${isEliminated ? 'pointer-events-none opacity-20 filter blur-[1px]' : ''}">
-                                    <button class="flex-1 bg-slate-800 hover:bg-red-900/20 active:bg-red-900/30 border border-slate-700 hover:border-red-800 text-red-500 rounded-lg py-3 flex items-center justify-center transition-all select-none touch-manipulation active:scale-95 group"
-                                        onmousedown="handleButtonDown(event, ${player.id}, 'remove')" onmouseup="handleButtonUp(${player.id}, 'remove')" onmouseleave="handleButtonUp(${player.id}, 'remove')" ontouchstart="handleButtonDown(event, ${player.id}, 'remove')" ontouchend="event.preventDefault(); handleButtonUp(${player.id}, 'remove')" oncontextmenu="event.preventDefault()">
-                                        <i data-lucide="minus" class="w-5 h-5 group-active:scale-90 transition-transform"></i>
-                                    </button>
-                                    <button class="flex-1 bg-slate-800 hover:bg-green-900/20 active:bg-green-900/30 border border-slate-700 hover:border-green-800 text-green-500 rounded-lg py-3 flex items-center justify-center transition-all select-none touch-manipulation active:scale-95 group"
-                                        onmousedown="handleButtonDown(event, ${player.id}, 'add')" onmouseup="handleButtonUp(${player.id}, 'add')" onmouseleave="handleButtonUp(${player.id}, 'add')" ontouchstart="handleButtonDown(event, ${player.id}, 'add')" ontouchend="event.preventDefault(); handleButtonUp(${player.id}, 'add')" oncontextmenu="event.preventDefault()">
-                                        <i data-lucide="plus" class="w-5 h-5 group-active:scale-90 transition-transform"></i>
-                                    </button>
-                                </div>
-                            ` : `
-                                <div class="mt-2 py-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center justify-center text-red-400 text-xs font-bold uppercase tracking-widest pointer-events-none">
-                                    <i data-lucide="target" class="w-4 h-4 mr-2"></i> Selecionar
-                                </div>
-                            `}
-                        </div>`;
-                    }).join('')}
-                </div>
-            </div>`;
-        }
-
-        // 3. FINISHED SCREEN
-        function renderFinished() {
-            const sortedPlayers = [...state.players].sort((a, b) => {
-                if (a.status === 'WINNER' && b.status === 'WINNER') return b.score - a.score;
-                if (a.status === 'WINNER') return -1;
-                if (b.status === 'WINNER') return 1;
-                return b.survivalTime - a.survivalTime;
-            });
-            const winner = sortedPlayers[0];
-            return `
-            <div class="min-h-screen p-6 flex flex-col items-center justify-center font-sans animate-fade-in">
-                <div class="max-w-xl w-full">
-                    <div class="text-center mb-10">
-                        <div class="inline-block p-4 rounded-full bg-yellow-500/10 mb-4 animate-bounce border border-yellow-500/20"><i data-lucide="trophy" class="w-12 h-12 text-yellow-500"></i></div>
-                        <h1 class="text-3xl font-black mb-2 tracking-tight">Missão Cumprida</h1>
-                        <p class="text-slate-500 flex items-center justify-center gap-2 font-mono text-sm"><i data-lucide="clock" class="w-4 h-4"></i> DURAÇÃO: <span class="text-green-400">${formatTime(state.gameDuration)}</span></p>
-                    </div>
-                    ${winner && winner.status === 'WINNER' ? `
-                        <div class="bg-gradient-to-b from-slate-800 to-slate-900 border border-slate-700 p-6 rounded-2xl mb-6 flex items-center justify-between shadow-2xl relative overflow-hidden group">
-                            <div class="absolute inset-0 bg-yellow-500/5 mix-blend-overlay group-hover:bg-yellow-500/10 transition-colors"></div>
-                            <div class="flex items-center gap-4 relative z-10">
-                                <div class="bg-yellow-500 w-12 h-12 rounded-lg flex items-center justify-center text-slate-900 font-black text-xl shadow-lg transform rotate-3 group-hover:rotate-0 transition-transform">1º</div>
-                                <div><p class="text-yellow-500 font-bold uppercase text-[10px] tracking-widest mb-0.5">Sobrevivente</p><h2 class="text-2xl font-bold text-white">${winner.name}</h2></div>
-                            </div>
-                            <div class="text-right relative z-10"><p class="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Integridade</p><p class="text-3xl font-black text-yellow-400 font-mono">${winner.score}</p></div>
-                        </div>
-                    ` : ''}
-                    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
-                        <div class="px-5 py-3 bg-slate-800/50 border-b border-slate-800 flex justify-between items-center"><h3 class="font-bold text-slate-400 text-xs uppercase tracking-wider">Log de Combate</h3></div>
-                        ${sortedPlayers.map((player, index) => {
-                            if (index === 0 && player.status === 'WINNER') return '';
-                            return `<div class="px-5 py-3 flex items-center justify-between border-b border-slate-800 last:border-0 hover:bg-slate-800/30 transition-colors">
-                                <div class="flex items-center gap-3"><div class="w-6 h-6 rounded bg-slate-800 flex items-center justify-center font-bold text-slate-500 text-xs font-mono">#${index + 1}</div><div><div class="flex items-center gap-2"><span class="font-bold text-sm text-slate-300">${player.name}</span><div class="w-1.5 h-1.5 rounded-full" style="background-color: ${player.color.hex}"></div></div><div class="text-[10px] text-slate-500 font-mono">${player.status === 'WINNER' ? 'ONLINE' : `FALHA DO SISTEMA: ${formatTime(player.survivalTime)}`}</div></div></div>
-                                <div class="font-mono font-bold text-lg ${player.status === 'ELIMINATED' ? 'text-red-500' : 'text-green-500'}">${player.score}</div>
-                            </div>`;
-                        }).join('')}
-                    </div>
-                    <button onclick="resetGame()" class="mt-8 w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2 border border-slate-700"><i data-lucide="rotate-ccw" class="w-5 h-5"></i> REINICIAR SISTEMA</button>
-                </div>
-            </div>`;
-        }
-
-        // 4. ATTACK MODAL (INPUT)
-        function renderAttackModal() {
-            const player = state.players.find(p => p.id === state.modals.attack.targetId);
-            if(!player) return '';
-
-            return `
-            <div class="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="bg-slate-900 w-full max-w-sm rounded-2xl border border-red-500/50 shadow-[0_0_30px_rgba(239,68,68,0.2)] animate-zoom-in overflow-hidden">
-                    
-                    <div class="bg-red-900/20 p-4 border-b border-red-900/30 flex items-center gap-3">
-                        <div class="p-2 bg-red-500/20 rounded-lg"><i data-lucide="crosshair" class="w-6 h-6 text-red-500"></i></div>
-                        <div>
-                            <h3 class="text-white font-bold">Executar Malware</h3>
-                            <p class="text-xs text-red-400">Alvo: <span class="font-mono font-bold text-white">${player.name}</span></p>
-                        </div>
-                    </div>
-
-                    <div class="p-6 space-y-6">
-                        <!-- Input Dano -->
-                        <div>
-                            <label class="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Dano Base do Ataque</label>
-                            <div class="relative">
-                                <input id="attack-input" type="number" value="${state.modals.attack.baseDamage}" 
-                                    oninput="state.modals.attack.baseDamage = this.value"
-                                    class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-4 text-2xl font-mono font-bold text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition-all placeholder-slate-700" />
-                                <div class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600 text-sm font-bold">HP</div>
-                            </div>
-                            <!-- Botões Rápidos -->
-                            <div class="grid grid-cols-5 gap-2 mt-3">
-                                ${[5, 10, 15, 20, 25].map(val => `
-                                    <button onclick="state.modals.attack.baseDamage = ${val}; render()" 
-                                        class="h-9 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-red-500/50 text-slate-300 hover:text-white rounded-lg font-mono text-sm font-bold transition-all shadow-sm active:scale-95 ${state.modals.attack.baseDamage == val ? 'border-red-500 bg-red-900/20 text-white shadow-[0_0_10px_rgba(239,68,68,0.2)]' : ''}">
-                                        ${val}
-                                    </button>
-                                `).join('')}
-                            </div>
-                        </div>
-
-                        <!-- Toggle Defesa (Texto Alterado) -->
-                        <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700 flex items-center justify-between cursor-pointer hover:bg-slate-800 transition-colors"
-                             onclick="state.modals.attack.hasDefense = !state.modals.attack.hasDefense; render()">
-                            <div class="pr-2">
-                                <div class="font-bold text-sm text-slate-200">Possui defesa da mesma categoria do ataque?</div>
-                            </div>
-                            <div class="w-12 h-6 rounded-full p-1 shrink-0 transition-colors duration-300 ${state.modals.attack.hasDefense ? 'bg-green-500' : 'bg-slate-600'}">
-                                <div class="w-4 h-4 bg-white rounded-full shadow-md transform transition-transform duration-300 ${state.modals.attack.hasDefense ? 'translate-x-6' : 'translate-x-0'}"></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="p-4 bg-slate-950/50 flex gap-3">
-                        <button onclick="state.modals.attack.visible = false; render()" class="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors">Cancelar</button>
-                        <button onclick="executeAttack()" class="flex-[2] py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-900/30 flex items-center justify-center gap-2 transition-transform active:scale-95">
-                            <i data-lucide="zap" class="w-5 h-5 fill-current"></i> EXECUTAR
-                        </button>
-                    </div>
-                </div>
-            </div>`;
-        }
-
-        // 5. RESULT MODAL (NOVO GRANDE - COM NOME E STATUS DE DEFESA)
-        function renderResultModal() {
-            const { message, type, base, actual, targetName, hasDefense } = state.modals.attackResult;
-            
-            let colorClass = 'text-slate-200';
-            let icon = 'info';
-            
-            if (type === 'danger') { colorClass = 'text-red-500'; icon = 'skull'; }
-            else if (type === 'warning') { colorClass = 'text-orange-500'; icon = 'alert-triangle'; }
-            else if (type === 'success') { colorClass = 'text-green-500'; icon = 'shield-check'; }
-
-            return `
-            <div class="fixed inset-0 z-[80] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 animate-fade-in">
-                <div class="w-full max-w-md flex flex-col items-center justify-center text-center animate-zoom-in">
-                    
-                    <div class="mb-4 p-6 rounded-full bg-slate-900 border-4 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
-                        <i data-lucide="${icon}" class="w-20 h-20 ${colorClass}"></i>
-                    </div>
-
-                    <div class="mb-4">
-                         <span class="text-slate-500 text-xs font-bold uppercase tracking-widest">Alvo Atingido</span>
-                         <h3 class="text-xl font-bold text-white mt-1 mb-2">${targetName}</h3>
-                         
-                         <!-- STATUS DE DEFESA -->
-                         ${hasDefense 
-                            ? `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-900/40 border border-green-500/40 text-green-400 text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(34,197,94,0.2)]"><i data-lucide="shield-check" class="w-3 h-3"></i> Defesa Ativa</div>`
-                            : `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-900/40 border border-red-500/40 text-red-400 text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(239,68,68,0.2)]"><i data-lucide="shield-off" class="w-3 h-3"></i> Sem Defesa</div>`
-                         }
-                    </div>
-
-                    <h2 class="text-lg font-bold text-slate-300 mb-6 leading-tight max-w-[80%]">${message}</h2>
-
-                    <div class="flex items-center gap-6 mb-10 bg-slate-900/50 px-8 py-4 rounded-2xl border border-slate-800">
-                        <div class="flex flex-col">
-                            <span class="text-xs font-bold text-slate-500 uppercase tracking-widest">Dano Base</span>
-                            <span class="text-2xl font-mono font-bold text-slate-400 line-through decoration-red-500/50">${base}</span>
-                        </div>
-                        <i data-lucide="arrow-right" class="w-6 h-6 text-slate-600"></i>
-                        <div class="flex flex-col">
-                            <span class="text-xs font-bold text-slate-500 uppercase tracking-widest">Dano Real</span>
-                            <span class="text-4xl font-mono font-black ${type === 'danger' ? 'text-red-500' : 'text-white'}">${actual}</span>
-                        </div>
-                    </div>
-
-                    <button onclick="closeResultModal()" class="relative overflow-hidden w-64 bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-xl transition-all border border-slate-600 group">
-                        <span class="relative z-10">OK (Fechar)</span>
-                        <div class="absolute bottom-0 left-0 h-1 bg-green-500 animate-progress"></div>
-                    </button>
-
+            <div id="setup-players-list-container" class="mb-6 hidden">
+                <h3 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider flex justify-between items-center">
+                    Jogadores <span id="setup-player-count" class="bg-slate-800 px-2 py-0.5 rounded text-slate-300">0</span>
+                </h3>
+                <div id="setup-players-list" class="space-y-2 max-h-52 overflow-y-auto pr-1 custom-scrollbar">
+                    <!-- Lista de jogadores Setup -->
                 </div>
             </div>
-            `;
-        }
 
-        // 6. RULES MODAL
-        function renderRulesModal() {
-            const tab = state.activeRulesTab;
-            let content = '';
+            <button id="btn-start-game" onclick="startGame()" disabled class="w-full bg-slate-100 hover:bg-white text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed font-black py-4 rounded-xl shadow-lg transform transition active:scale-95 flex items-center justify-center gap-2 text-lg tracking-tight">
+                <i data-lucide="play" class="w-6 h-6 fill-slate-900 text-slate-900"></i> INICIAR PROTOCOLO
+            </button>
+        </div>
+    </div>
+
+    <!-- ================= VIEW: PLAYING ================= -->
+    <div id="view-playing" class="view-section flex flex-col p-3 min-h-screen transition-colors duration-500">
+        <!-- Header -->
+        <div class="flex justify-between items-center mb-4 bg-slate-900/90 backdrop-blur px-4 py-3 rounded-xl border border-slate-800 shadow-md sticky top-2 z-30">
+            <div class="flex items-center gap-3">
+                <h1 class="font-black text-xl tracking-tighter hidden sm:block">Pwned<span class="text-green-500">!</span></h1>
+                <div class="flex items-center gap-2 text-slate-400 text-xs sm:text-sm font-mono">
+                    <i data-lucide="clock" class="w-4 h-4 animate-pulse text-green-500"></i>
+                    <span><span id="game-timer-display" class="text-slate-200">00:00</span></span>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button id="btn-attack-mode" onclick="toggleAttackMode()" class="p-2 rounded-lg transition-all border bg-slate-800 text-slate-400 border-transparent hover:bg-slate-700">
+                    <i id="icon-attack-mode" data-lucide="bug" class="w-5 h-5"></i>
+                </button>
+                <div class="w-px h-8 bg-slate-700 mx-1"></div>
+                <button onclick="toggleModal('rules', true)" class="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 transition-colors"><i data-lucide="book-open" class="w-5 h-5"></i></button>
+                <button onclick="toggleModal('confirmEnd', true)" class="p-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 rounded-lg border border-red-900/30 transition-colors"><i data-lucide="power" class="w-5 h-5"></i></button>
+            </div>
+        </div>
+
+        <!-- Warning Attack Mode -->
+        <div id="attack-mode-warning" class="mb-4 text-center hidden">
+            <span class="bg-red-600 text-white text-xs font-bold px-3 py-1 rounded-full shadow-lg border border-red-400 tracking-wider uppercase animate-pulse">
+                Modo Ataque: Selecione um Alvo
+            </span>
+        </div>
+
+        <!-- Grid Players -->
+        <div id="players-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 pb-20 auto-rows-fr">
+            <!-- Cards inseridos via JS (Reconciliation Pattern) -->
+        </div>
+    </div>
+
+    <!-- ================= VIEW: FINISHED ================= -->
+    <div id="view-finished" class="view-section flex flex-col items-center justify-center p-6">
+        <div class="max-w-xl w-full">
+            <div class="text-center mb-10">
+                <div class="inline-block p-4 rounded-full bg-yellow-500/10 mb-4 animate-bounce border border-yellow-500/20"><i data-lucide="trophy" class="w-12 h-12 text-yellow-500"></i></div>
+                <h1 class="text-3xl font-black mb-2 tracking-tight">Missão Cumprida</h1>
+                <p class="text-slate-500 flex items-center justify-center gap-2 font-mono text-sm"><i data-lucide="clock" class="w-4 h-4"></i> DURAÇÃO: <span id="final-duration" class="text-green-400">00:00</span></p>
+            </div>
             
-            if (tab === 'overview') {
-                content = `
-                <div class="space-y-4 animate-slide-in">
+            <div id="winner-card" class="bg-gradient-to-b from-slate-800 to-slate-900 border border-slate-700 p-6 rounded-2xl mb-6 flex items-center justify-between shadow-2xl relative overflow-hidden group hidden">
+                <div class="absolute inset-0 bg-yellow-500/5 mix-blend-overlay group-hover:bg-yellow-500/10 transition-colors"></div>
+                <div class="flex items-center gap-4 relative z-10">
+                    <div class="bg-yellow-500 w-12 h-12 rounded-lg flex items-center justify-center text-slate-900 font-black text-xl shadow-lg transform rotate-3 group-hover:rotate-0 transition-transform">1º</div>
+                    <div><p class="text-yellow-500 font-bold uppercase text-[10px] tracking-widest mb-0.5">Sobrevivente</p><h2 id="winner-name" class="text-2xl font-bold text-white">Nome</h2></div>
+                </div>
+                <div class="text-right relative z-10"><p class="text-[10px] uppercase text-slate-500 font-bold tracking-wider">Integridade</p><p id="winner-score" class="text-3xl font-black text-yellow-400 font-mono">100</p></div>
+            </div>
+
+            <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden mb-6">
+                <div class="px-5 py-3 bg-slate-800/50 border-b border-slate-800 flex justify-between items-center"><h3 class="font-bold text-slate-400 text-xs uppercase tracking-wider">Log de Combate</h3></div>
+                <div id="combat-log"></div>
+            </div>
+
+            <div class="flex gap-4">
+                <button onclick="rematchGame()" class="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95 border-b-4 border-green-700"><i data-lucide="refresh-cw" class="w-5 h-5"></i> REVANCHE</button>
+                <button onclick="resetGame()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-xl transition-all flex items-center justify-center gap-2 border border-slate-700 active:scale-95"><i data-lucide="power" class="w-5 h-5"></i> NOVO JOGO</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= MODALS ================= -->
+    
+    <!-- Confirm End Modal -->
+    <div id="modal-confirmEnd" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 modal-overlay">
+        <div class="bg-slate-800 p-6 rounded-2xl border border-slate-600 shadow-2xl max-w-sm w-full modal-content">
+            <div class="flex justify-center mb-4"><div class="bg-yellow-500/20 p-3 rounded-full"><i data-lucide="alert-triangle" class="w-8 h-8 text-yellow-500"></i></div></div>
+            <h3 class="text-xl font-bold text-white text-center mb-2">Abortar Missão?</h3>
+            <p class="text-slate-400 text-center mb-6">Tem certeza que deseja encerrar a partida agora?</p>
+            <div class="flex gap-3">
+                <button onclick="toggleModal('confirmEnd', false)" class="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-semibold transition-colors">Cancelar</button>
+                <button onclick="finishGame()" class="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-semibold transition-colors shadow-lg shadow-red-900/20">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Rules Modal -->
+    <div id="modal-rules" class="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 modal-overlay">
+        <div class="bg-slate-800 w-full max-w-2xl rounded-2xl border border-slate-600 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] modal-content">
+            <div class="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
+                <div class="flex items-center gap-2 text-green-400"><i data-lucide="book-open" class="w-6 h-6"></i><h2 class="text-xl font-bold font-mono">Manual: Pwned!</h2></div>
+                <button onclick="toggleModal('rules', false)" class="p-2 hover:bg-slate-700 rounded-full transition-colors text-slate-400 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button>
+            </div>
+            
+            <!-- Tabs -->
+            <div class="flex border-b border-slate-700 bg-slate-800 overflow-x-auto">
+                <button onclick="switchRuleTab('overview')" id="tab-btn-overview" class="whitespace-nowrap flex-1 py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold transition-colors border-b-2 border-green-500 text-green-400 bg-slate-700/30"><i data-lucide="shield" class="w-4 h-4"></i> Geral</button>
+                <button onclick="switchRuleTab('turn')" id="tab-btn-turn" class="whitespace-nowrap flex-1 py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold transition-colors border-b-2 border-transparent text-slate-400 hover:text-white hover:bg-slate-700/50"><i data-lucide="clock" class="w-4 h-4"></i> Turno</button>
+                <button onclick="switchRuleTab('resources')" id="tab-btn-resources" class="whitespace-nowrap flex-1 py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold transition-colors border-b-2 border-transparent text-slate-400 hover:text-white hover:bg-slate-700/50"><i data-lucide="coins" class="w-4 h-4"></i> Recursos</button>
+                <button onclick="switchRuleTab('events')" id="tab-btn-events" class="whitespace-nowrap flex-1 py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold transition-colors border-b-2 border-transparent text-slate-400 hover:text-white hover:bg-slate-700/50"><i data-lucide="zap" class="w-4 h-4"></i> Eventos</button>
+            </div>
+
+            <div class="p-6 overflow-y-auto custom-scrollbar bg-slate-800 text-slate-300 space-y-4 min-h-[300px]">
+                
+                <!-- Tab: Overview -->
+                <div id="rule-content-overview" class="space-y-4 animate-slide-in">
                     <div class="bg-slate-900/50 p-4 rounded-lg border border-slate-700">
                         <h3 class="text-white font-bold mb-2 flex items-center gap-2"><i data-lucide="swords" class="w-5 h-5 text-red-400"></i> Objetivo</h3>
                         <p>Ser o último sobrevivente com <strong>Integridade acima de 0</strong>. Use ataques cibernéticos para drenar oponentes e defesas para proteger seus sistemas.</p>
@@ -739,10 +250,10 @@
                             <p class="text-xs text-yellow-500 mt-2 font-bold">Regra de Ouro: O texto da carta sempre tem prioridade sobre as regras gerais.</p>
                         </div>
                     </div>
-                </div>`;
-            } else if (tab === 'turn') {
-                content = `
-                <div class="space-y-4 animate-slide-in">
+                </div>
+
+                <!-- Tab: Turn -->
+                <div id="rule-content-turn" class="space-y-4 animate-slide-in hidden">
                     <ol class="relative border-l border-slate-600 ml-3 space-y-6">
                         <li class="ml-6">
                             <span class="absolute flex items-center justify-center w-8 h-8 bg-green-900 rounded-full -left-4 ring-4 ring-slate-800 text-green-400 font-bold text-sm">1</span>
@@ -769,10 +280,10 @@
                             </div>
                         </li>
                     </ol>
-                </div>`;
-            } else if (tab === 'resources') {
-                content = `
-                <div class="space-y-4 animate-slide-in">
+                </div>
+
+                <!-- Tab: Resources -->
+                <div id="rule-content-resources" class="space-y-4 animate-slide-in hidden">
                     <div class="bg-indigo-900/20 border border-indigo-500/30 p-4 rounded-lg">
                         <h3 class="font-bold text-white text-md mb-2 flex items-center gap-2"><i data-lucide="coins" class="w-5 h-5 text-indigo-400"></i> Especialização</h3>
                         <p class="text-sm text-slate-300">Recursos especializados valem o dobro para sua categoria específica.</p>
@@ -802,60 +313,772 @@
                             </div>
                         </div>
                     </div>
-                </div>`;
-            } else if (tab === 'events') {
-                const events = [
-                    "LGPD/GDPR: Pague 1 Recurso ou perca 10 HP.",
-                    "Surto de Malware: Sem patch? -15 HP.",
-                    "Corte de Orçamento: Descarte 1 Recurso.",
-                    "Auditoria: >2 Defesas ganha recurso, senão descarta ação.",
-                    "Phishing Massivo: Ataques Sociais +5 dano.",
-                    "Sem Backup: Café no servidor causa -10 HP.",
-                    "Vazamento de Credenciais: Sem MFA -10 HP.",
-                    "Ataque de Força Bruta: Sem Gerenciador de Senhas -10 HP."
-                ];
-                content = `
-                <div class="space-y-4 animate-slide-in">
+                </div>
+
+                <!-- Tab: Events -->
+                <div id="rule-content-events" class="space-y-4 animate-slide-in hidden">
                     <div class="bg-yellow-500/10 border border-yellow-500/30 p-4 rounded-lg flex gap-3 items-start">
                         <i data-lucide="alert-triangle" class="w-6 h-6 text-yellow-500 shrink-0 mt-1"></i>
                         <div><h3 class="font-bold text-white text-sm">Rodada de Eventos</h3><p class="text-sm text-slate-400 mt-1">No início de cada nova rodada (após todos jogarem), revele 1 carta de Evento. Efeito imediato para TODOS.</p></div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                        ${events.map(evt => `<div class="bg-slate-700/40 p-2 rounded border-l-2 border-purple-500 text-slate-300">${evt}</div>`).join('')}
+                         <div class="bg-slate-700/40 p-2 rounded border-l-2 border-purple-500 text-slate-300">LGPD/GDPR: Pague 1 Recurso ou perca 10 HP.</div>
+                         <div class="bg-slate-700/40 p-2 rounded border-l-2 border-purple-500 text-slate-300">Surto de Malware: Sem patch? -15 HP.</div>
+                         <div class="bg-slate-700/40 p-2 rounded border-l-2 border-purple-500 text-slate-300">Corte de Orçamento: Descarte 1 Recurso.</div>
+                         <div class="bg-slate-700/40 p-2 rounded border-l-2 border-purple-500 text-slate-300">Auditoria: >2 Defesas ganha recurso, senão descarta ação.</div>
+                         <div class="bg-slate-700/40 p-2 rounded border-l-2 border-purple-500 text-slate-300">Phishing Massivo: Ataques Sociais +5 dano.</div>
+                         <div class="bg-slate-700/40 p-2 rounded border-l-2 border-purple-500 text-slate-300">Sem Backup: Café no servidor causa -10 HP.</div>
+                         <div class="bg-slate-700/40 p-2 rounded border-l-2 border-purple-500 text-slate-300">Vazamento de Credenciais: Sem MFA -10 HP.</div>
+                         <div class="bg-slate-700/40 p-2 rounded border-l-2 border-purple-500 text-slate-300">Ataque de Força Bruta: Sem Gerenciador de Senhas -10 HP.</div>
                     </div>
-                </div>`;
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- Long Press Menu -->
+    <div id="modal-longPress" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm modal-overlay" onclick="closeLongPress()">
+        <div class="bg-slate-800 rounded-xl p-4 shadow-2xl border border-slate-600 w-64 modal-content" onclick="event.stopPropagation()">
+            <h3 id="long-press-title" class="text-center text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">Ação Rápida</h3>
+            <div class="grid grid-cols-5 gap-2" id="long-press-buttons">
+                <!-- Botões 5, 10... -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Attack Input Modal -->
+    <div id="modal-attack" class="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4 modal-overlay">
+        <div class="bg-slate-900 w-full max-w-sm rounded-2xl border border-red-500/50 shadow-[0_0_30px_rgba(239,68,68,0.2)] overflow-hidden modal-content">
+            <div class="bg-red-900/20 p-4 border-b border-red-900/30 flex items-center gap-3">
+                <div class="p-2 bg-red-500/20 rounded-lg"><i data-lucide="crosshair" class="w-6 h-6 text-red-500"></i></div>
+                <div>
+                    <h3 class="text-white font-bold">Executar Ataque</h3>
+                    <p class="text-xs text-red-400">Alvo: <span id="attack-target-name" class="font-mono font-bold text-white">Player</span></p>
+                </div>
+            </div>
+            <div class="p-6 space-y-6">
+                <div>
+                    <label class="block text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">Dano Base</label>
+                    <div class="relative">
+                        <input id="attack-input-damage" type="number" value="10" 
+                            class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-4 text-2xl font-mono font-bold text-white focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none transition-all placeholder-slate-700" />
+                        <div class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-600 text-sm font-bold">HP</div>
+                    </div>
+                    <div class="grid grid-cols-5 gap-2 mt-3">
+                        <button onclick="setAttackDamage(5)" class="attack-quick-btn h-9 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg font-bold text-sm">5</button>
+                        <button onclick="setAttackDamage(10)" class="attack-quick-btn h-9 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg font-bold text-sm">10</button>
+                        <button onclick="setAttackDamage(15)" class="attack-quick-btn h-9 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg font-bold text-sm">15</button>
+                        <button onclick="setAttackDamage(20)" class="attack-quick-btn h-9 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg font-bold text-sm">20</button>
+                        <button onclick="setAttackDamage(25)" class="attack-quick-btn h-9 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-lg font-bold text-sm">25</button>
+                    </div>
+                </div>
+                <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700 flex items-center justify-between cursor-pointer hover:bg-slate-800 transition-colors"
+                        onclick="toggleAttackDefense()">
+                    <div class="pr-2">
+                        <div class="font-bold text-sm text-slate-200">Possui defesa da mesma categoria?</div>
+                    </div>
+                    <div id="attack-defense-toggle" class="w-12 h-6 rounded-full p-1 shrink-0 transition-colors duration-300 bg-slate-600">
+                        <div class="w-4 h-4 bg-white rounded-full shadow-md transform transition-transform duration-300 translate-x-0"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 bg-slate-950/50 flex gap-3">
+                <button onclick="toggleModal('attack', false)" class="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors">Cancelar</button>
+                <button onclick="executeAttack()" class="flex-[2] py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-900/30 flex items-center justify-center gap-2 transition-transform active:scale-95">
+                    <i data-lucide="zap" class="w-5 h-5 fill-current"></i> EXECUTAR
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Attack Result Modal -->
+    <div id="modal-attackResult" class="fixed inset-0 z-[80] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 modal-overlay">
+        <div class="w-full max-w-md flex flex-col items-center justify-center text-center modal-content">
+            <div class="mb-4 p-6 rounded-full bg-slate-900 border-4 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+                <i id="result-icon" data-lucide="info" class="w-20 h-20 text-slate-200"></i>
+            </div>
+            <div class="mb-4">
+                    <span class="text-slate-500 text-xs font-bold uppercase tracking-widest">Alvo Atingido</span>
+                    <h3 id="result-target-name" class="text-xl font-bold text-white mt-1 mb-2">Player</h3>
+                    <div id="result-defense-status"></div>
+            </div>
+            <h2 id="result-message" class="text-lg font-bold text-slate-300 mb-6 leading-tight max-w-[90%] min-h-[3.5rem] flex items-center justify-center">Mensagem</h2>
+            <div class="flex items-center gap-6 mb-10 bg-slate-900/50 px-8 py-4 rounded-2xl border border-slate-800">
+                <div class="flex flex-col">
+                    <span class="text-xs font-bold text-slate-500 uppercase tracking-widest">Dano Base</span>
+                    <span id="result-base" class="text-2xl font-mono font-bold text-slate-400 line-through decoration-red-500/50">0</span>
+                </div>
+                <i data-lucide="arrow-right" class="w-6 h-6 text-slate-600"></i>
+                <div class="flex flex-col">
+                    <span class="text-xs font-bold text-slate-500 uppercase tracking-widest">Dano Real</span>
+                    <span id="result-actual" class="text-4xl font-mono font-black text-white">0</span>
+                </div>
+            </div>
+            <button onclick="closeResultModal()" class="relative overflow-hidden w-64 bg-slate-800 hover:bg-slate-700 text-white font-bold py-4 rounded-xl transition-all border border-slate-600 group">
+                <span class="relative z-10">OK (Fechar)</span>
+                <div id="result-progress-bar" class="absolute bottom-0 left-0 h-1 bg-green-500"></div>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- BANCO DE MENSAGENS GENÉRICAS (SEM JARGÃO TÉCNICO) ---
+        const MESSAGES = {
+            noDefense_fail: [
+                "Falha na execução do protocolo de ataque.",
+                "Erro de conexão: Carga não enviada.",
+                "Ataque cancelado por erro de configuração.",
+                "Tempo limite esgotado antes da invasão.",
+                "O comando de ataque foi rejeitado."
+            ],
+            noDefense_success: [
+                "Acesso não autorizado confirmado.",
+                "Integridade do sistema comprometida.",
+                "Brecha crítica explorada com sucesso.",
+                "Dados sensíveis expostos.",
+                "Controle do sistema obtido."
+            ],
+            defense_block: [ // 0 Dano
+                "Defesa de perímetro bloqueou a intrusão.",
+                "Protocolo de segurança rejeitou o acesso.",
+                "Ameaça neutralizada automaticamente.",
+                "Acesso negado pela política de segurança.",
+                "Tentativa de ataque identificada e barrada."
+            ],
+            defense_low: [ // 10% Dano
+                "Impacto mínimo na infraestrutura.",
+                "Defesa absorveu a maior parte do dano.",
+                "Dano superficial. Operação estável.",
+                "Ataque mitigado. Perda irrelevante.",
+                "Sistemas de contingência ativados."
+            ],
+            defense_medium: [ // 35% Dano
+                "Brecha parcial encontrada na defesa.",
+                "Proteção primária contornada.",
+                "Alerta de segurança: Dano moderado.",
+                "Defesa parcialmente comprometida.",
+                "Falha na contenção permitiu acesso limitado."
+            ],
+            defense_critical: [ // 75% Dano
+                "Falha crítica nos protocolos de defesa!",
+                "Vulnerabilidade desconhecida explorada.",
+                "Medidas de segurança ineficazes.",
+                "Acesso profundo obtido apesar das defesas.",
+                "Erro de operação comprometeu a proteção."
+            ]
+        };
+
+        const ALL_COLORS = [
+            { name: 'Vermelho', hex: '#ef4444' }, { name: 'Azul', hex: '#3b82f6' },
+            { name: 'Verde', hex: '#22c55e' }, { name: 'Amarelo', hex: '#eab308' },
+            { name: 'Roxo', hex: '#a855f7' }, { name: 'Rosa', hex: '#ec4899' },
+            { name: 'Laranja', hex: '#f97316' }, { name: 'Ciano', hex: '#06b6d4' },
+            { name: 'Cinza', hex: '#64748b' }, { name: 'Índigo', hex: '#6366f1' },
+        ];
+
+        // --- ESTADO ---
+        const state = {
+            players: [],
+            selectedColor: null,
+            startTime: null,
+            attackMode: false,
+            // Variáveis temporárias para modais
+            tempAttack: { targetId: null, baseDamage: 10, hasDefense: false },
+            longPress: { playerId: null, type: null }
+        };
+
+        let gameInterval = null;
+        let longPressTimeout = null;
+        let resultTimeout = null;
+        let isLongPress = false;
+        let ignoreMouse = false; // Flag para ignorar eventos de mouse duplicados por toque
+
+        // --- CORE UI FUNCTIONS (DOM MANIPULATION) ---
+
+        function init() {
+            renderColorPicker();
+            updateUI();
+        }
+
+        function switchView(viewId) {
+            document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+            document.getElementById(viewId).classList.add('active');
+        }
+
+        function toggleModal(modalName, show) {
+            const el = document.getElementById(`modal-${modalName}`);
+            if (show) el.classList.add('open');
+            else el.classList.remove('open');
+        }
+
+        function updateUI() {
+            // View Logic
+            if (!state.startTime && state.players.length >= 0 && document.getElementById('view-setup').classList.contains('active')) {
+                // Setup updates
+                document.getElementById('setup-player-count').innerText = state.players.length;
+                const list = document.getElementById('setup-players-list');
+                const listContainer = document.getElementById('setup-players-list-container');
+                const btnStart = document.getElementById('btn-start-game');
+                
+                if (state.players.length > 0) {
+                    listContainer.classList.remove('hidden');
+                    btnStart.disabled = false;
+                    btnStart.classList.remove('opacity-50', 'cursor-not-allowed');
+                    
+                    // Rebuild setup list (simple enough for setup screen)
+                    list.innerHTML = state.players.map(p => `
+                        <div class="flex items-center justify-between bg-slate-800/50 p-3 rounded-lg border border-slate-700/50">
+                            <div class="flex items-center gap-3">
+                                <div class="w-3 h-3 rounded-full" style="background-color: ${p.color.hex}"></div>
+                                <span class="font-mono font-bold text-sm text-slate-200">${p.name}</span>
+                            </div>
+                            <button onclick="removePlayer(${p.id})" class="text-slate-600 hover:text-red-400"><i data-lucide="x" class="w-4 h-4"></i></button>
+                        </div>
+                    `).join('');
+                    lucide.createIcons();
+                } else {
+                    listContainer.classList.add('hidden');
+                    btnStart.disabled = true;
+                    btnStart.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+            }
+        }
+
+        // --- SETUP LOGIC ---
+
+        function renderColorPicker() {
+            autoSelectColor();
+            const container = document.getElementById('color-picker-container');
+            const usedColors = state.players.map(p => p.color.name);
+            
+            container.innerHTML = ALL_COLORS.map(c => {
+                const isUsed = usedColors.includes(c.name);
+                const isSelected = state.selectedColor && state.selectedColor.name === c.name;
+                
+                if (isUsed && !isSelected) return ''; // Hide used colors
+
+                return `<button type="button" onclick="selectColor('${c.name}')"
+                    class="w-8 h-8 rounded-md border-2 transition-all duration-200 ${isSelected ? 'border-white scale-110 opacity-100 ring-2 ring-white/50' : 'border-transparent opacity-40 hover:opacity-100'}"
+                    style="background-color: ${c.hex};"></button>`;
+            }).join('');
+        }
+
+        function selectColor(name) {
+            state.selectedColor = ALL_COLORS.find(c => c.name === name);
+            renderColorPicker();
+        }
+
+        function autoSelectColor() {
+            const usedColors = state.players.map(p => p.color.name);
+            const available = ALL_COLORS.filter(c => !usedColors.includes(c.name));
+            if (!state.selectedColor || usedColors.includes(state.selectedColor.name)) {
+                if (available.length > 0) state.selectedColor = available[0];
+            }
+        }
+
+        function addPlayer(e) {
+            e.preventDefault();
+            const input = document.getElementById('input-name');
+            let name = input.value.trim() || `Player ${state.players.length + 1}`;
+            
+            if (!state.selectedColor) autoSelectColor();
+
+            state.players.push({
+                id: Date.now(),
+                name: name,
+                color: state.selectedColor,
+                score: 100,
+                status: 'ACTIVE',
+                survivalTime: null
+            });
+
+            input.value = '';
+            state.selectedColor = null;
+            renderColorPicker();
+            updateUI();
+        }
+
+        function removePlayer(id) {
+            state.players = state.players.filter(p => p.id !== id);
+            renderColorPicker();
+            updateUI();
+        }
+
+        // --- GAME LOGIC ---
+
+        function startGame() {
+            state.startTime = Date.now();
+            switchView('view-playing');
+            updatePlayerGrid();
+            
+            gameInterval = setInterval(() => {
+                const elapsed = Date.now() - state.startTime;
+                document.getElementById('game-timer-display').innerText = formatTimerDisplay(elapsed);
+            }, 1000);
+        }
+
+        function finishGame() {
+            clearInterval(gameInterval);
+            const duration = Date.now() - state.startTime;
+            
+            // Finalize players
+            state.players.forEach(p => {
+                if(p.status === 'ACTIVE') {
+                    p.status = 'WINNER';
+                    p.survivalTime = duration;
+                }
+            });
+
+            // Sort logic
+            const sorted = [...state.players].sort((a, b) => {
+                if (a.status === 'WINNER') return -1;
+                if (b.status === 'WINNER') return 1;
+                return b.survivalTime - a.survivalTime;
+            });
+            const winner = sorted[0];
+
+            // Render Result
+            document.getElementById('final-duration').innerText = formatTimerDisplay(duration);
+            
+            if (winner && winner.status === 'WINNER') {
+                document.getElementById('winner-card').classList.remove('hidden');
+                document.getElementById('winner-name').innerText = winner.name;
+                document.getElementById('winner-score').innerText = winner.score;
+            } else {
+                document.getElementById('winner-card').classList.add('hidden');
             }
 
-            return `
-            <div class="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in">
-                <div class="bg-slate-800 w-full max-w-2xl rounded-2xl border border-slate-600 shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
-                    <div class="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
-                        <div class="flex items-center gap-2 text-green-400"><i data-lucide="book-open" class="w-6 h-6"></i><h2 class="text-xl font-bold font-mono">Manual: Pwned!</h2></div>
-                        <button onclick="state.modals.rules = false; render()" class="p-2 hover:bg-slate-700 rounded-full transition-colors text-slate-400 hover:text-white"><i data-lucide="x" class="w-6 h-6"></i></button>
+            document.getElementById('combat-log').innerHTML = sorted.map((p, i) => {
+                if(i===0 && p.status === 'WINNER') return '';
+                const timeStr = p.status === 'WINNER' ? 'SOBREVIVENTE' : `ELIMINADO EM ${formatTimerDisplay(p.survivalTime)}`;
+                return `<div class="px-5 py-3 flex items-center justify-between border-b border-slate-800 last:border-0">
+                    <div class="flex items-center gap-3">
+                        <div class="w-6 h-6 rounded bg-slate-800 flex items-center justify-center font-bold text-slate-500 text-xs">#${i+1}</div>
+                        <div>
+                            <div class="flex items-center gap-2"><span class="font-bold text-sm text-slate-300">${p.name}</span><div class="w-1.5 h-1.5 rounded-full" style="background-color: ${p.color.hex}"></div></div>
+                            <div class="text-[10px] text-slate-500 font-mono">${timeStr}</div>
+                        </div>
                     </div>
-                    <div class="flex border-b border-slate-700 bg-slate-800 overflow-x-auto">
-                        <button onclick="state.activeRulesTab = 'overview'; render()" class="whitespace-nowrap flex-1 py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold transition-colors border-b-2 ${tab === 'overview' ? 'border-green-500 text-green-400 bg-slate-700/30' : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-700/50'}"><i data-lucide="shield" class="w-4 h-4"></i> Geral</button>
-                        <button onclick="state.activeRulesTab = 'turn'; render()" class="whitespace-nowrap flex-1 py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold transition-colors border-b-2 ${tab === 'turn' ? 'border-green-500 text-green-400 bg-slate-700/30' : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-700/50'}"><i data-lucide="clock" class="w-4 h-4"></i> Turno</button>
-                        <button onclick="state.activeRulesTab = 'resources'; render()" class="whitespace-nowrap flex-1 py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold transition-colors border-b-2 ${tab === 'resources' ? 'border-green-500 text-green-400 bg-slate-700/30' : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-700/50'}"><i data-lucide="coins" class="w-4 h-4"></i> Recursos</button>
-                        <button onclick="state.activeRulesTab = 'events'; render()" class="whitespace-nowrap flex-1 py-3 px-4 flex items-center justify-center gap-2 text-sm font-bold transition-colors border-b-2 ${tab === 'events' ? 'border-green-500 text-green-400 bg-slate-700/30' : 'border-transparent text-slate-400 hover:text-white hover:bg-slate-700/50'}"><i data-lucide="zap" class="w-4 h-4"></i> Eventos</button>
-                    </div>
-                    <div class="p-6 overflow-y-auto custom-scrollbar bg-slate-800 text-slate-300 space-y-4">${content}</div>
-                </div>
-            </div>`;
+                    <div class="font-mono font-bold text-lg ${p.status === 'ELIMINATED' ? 'text-red-500' : 'text-green-500'}">${p.score}</div>
+                </div>`
+            }).join('');
+
+            toggleModal('confirmEnd', false);
+            toggleModal('attackResult', false); // Close potentially open result
+            switchView('view-finished');
         }
 
-        // CONFIRM MODAL
-        function renderConfirmModal() {
-            return `<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fade-in"><div class="bg-slate-800 p-6 rounded-2xl border border-slate-600 shadow-2xl max-w-sm w-full transform scale-100 animate-zoom-in"><div class="flex justify-center mb-4"><div class="bg-yellow-500/20 p-3 rounded-full"><i data-lucide="alert-triangle" class="w-8 h-8 text-yellow-500"></i></div></div><h3 class="text-xl font-bold text-white text-center mb-2">Abortar Missão?</h3><p class="text-slate-400 text-center mb-6">Tem certeza que deseja encerrar a partida agora?</p><div class="flex gap-3"><button onclick="state.modals.confirmEnd = false; render()" class="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-white rounded-xl font-semibold transition-colors">Cancelar</button><button onclick="finishGame()" class="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-semibold transition-colors shadow-lg shadow-red-900/20">Confirmar</button></div></div></div>`;
+        // --- RESET LOGICS ---
+
+        // Rematch: Keeps players, resets score/status
+        function rematchGame() {
+            state.players = state.players.map(p => ({
+                ...p,
+                score: 100,
+                status: 'ACTIVE',
+                survivalTime: null
+            }));
+            state.startTime = null;
+            state.attackMode = false;
+            switchView('view-setup');
+            renderColorPicker(); // Updates picker based on existing players
+            updateUI(); // Shows existing list
         }
 
-        // MENU LONG PRESS
-        function renderLongPressMenu() {
-            const { type } = state.modals.longPress;
-            return `<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-fade-in" onclick="state.modals.longPress.visible = false; render()"><div class="bg-slate-800 rounded-xl p-4 shadow-2xl border border-slate-600 transform scale-100 animate-zoom-in w-64" onclick="event.stopPropagation()"><h3 class="text-center text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">${type === 'add' ? 'Adicionar Integridade' : 'Dano Crítico'}</h3><div class="grid grid-cols-5 gap-2">${VALUES_OPTIONS.map(val => `<button onclick="handleMenuSelect(${val})" class="h-10 rounded-lg font-bold text-sm shadow-lg flex items-center justify-center transition-transform hover:scale-110 active:scale-95 ${type === 'add' ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-red-600 hover:bg-red-500 text-white'}">${val}</button>`).join('')}</div></div></div>`;
+        // Hard Reset: Clears everything (with explicit DOM cleanup)
+        function resetGame() {
+            state.players = [];
+            state.startTime = null;
+            state.attackMode = false;
+            
+            // Explicit DOM Cleanup to prevent ghost players
+            document.getElementById('players-grid').innerHTML = ''; 
+            document.getElementById('setup-players-list').innerHTML = '';
+            
+            switchView('view-setup');
+            renderColorPicker();
+            updateUI();
         }
 
+        // --- GRID UPDATES (CRITICAL PERFORMANCE) ---
+
+        function updatePlayerGrid() {
+            const grid = document.getElementById('players-grid');
+            const viewPlaying = document.getElementById('view-playing');
+            
+            // Attack Mode Visuals
+            const btnAttack = document.getElementById('btn-attack-mode');
+            const iconAttack = document.getElementById('icon-attack-mode');
+            const warningAttack = document.getElementById('attack-mode-warning');
+
+            if (state.attackMode) {
+                viewPlaying.classList.add('bg-red-950/30');
+                btnAttack.classList.replace('bg-slate-800', 'bg-red-600');
+                btnAttack.classList.replace('text-slate-400', 'text-white');
+                btnAttack.classList.replace('border-transparent', 'border-red-400');
+                btnAttack.classList.add('animate-pulse', 'shadow-[0_0_10px_rgba(220,38,38,0.5)]');
+                iconAttack.setAttribute('data-lucide', 'skull');
+                warningAttack.classList.remove('hidden');
+            } else {
+                viewPlaying.classList.remove('bg-red-950/30');
+                btnAttack.classList.replace('bg-red-600', 'bg-slate-800');
+                btnAttack.classList.replace('text-white', 'text-slate-400');
+                btnAttack.classList.replace('border-red-400', 'border-transparent');
+                btnAttack.classList.remove('animate-pulse', 'shadow-[0_0_10px_rgba(220,38,38,0.5)]');
+                iconAttack.setAttribute('data-lucide', 'bug');
+                warningAttack.classList.add('hidden');
+            }
+            lucide.createIcons();
+
+            // Determine leader
+            let leaderId = null;
+            const active = state.players.filter(p => p.status === 'ACTIVE');
+            if (active.length > 0) {
+                leaderId = active.reduce((prev, curr) => (prev.score > curr.score) ? prev : curr).id;
+            }
+
+            // Sync Cards
+            state.players.forEach(p => {
+                let card = document.getElementById(`player-card-${p.id}`);
+                
+                // Create if missing (Reconciliation)
+                if (!card) {
+                    card = document.createElement('div');
+                    card.id = `player-card-${p.id}`;
+                    // Inner HTML Structure (Static parts)
+                    card.innerHTML = `
+                        <div id="badge-leader-${p.id}" class="absolute -top-3 left-1/2 -translate-x-1/2 bg-yellow-500 text-slate-900 px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 shadow-lg uppercase tracking-wider hidden"><i data-lucide="crown" class="w-3 h-3"></i> Líder</div>
+                        <div id="badge-target-${p.id}" class="absolute -top-3 left-1/2 -translate-x-1/2 bg-red-600 text-white px-2 py-0.5 rounded-md text-[10px] font-bold flex items-center gap-1 shadow-lg uppercase tracking-wider hidden"><i data-lucide="crosshair" class="w-3 h-3"></i> ALVO</div>
+                        <div id="overlay-eliminated-${p.id}" class="absolute inset-0 flex items-center justify-center z-20 pointer-events-none hidden"><div class="bg-red-900/90 text-red-100 px-3 py-1 rounded border border-red-500/50 rotate-[-10deg] shadow-xl text-sm font-black tracking-widest uppercase">Eliminado</div></div>
+                        
+                        <div class="flex justify-between items-start mb-2 pointer-events-none">
+                            <div class="min-w-0">
+                                <h2 class="text-sm font-bold truncate text-slate-200">${p.name}</h2>
+                                <div class="flex items-center gap-1.5 mt-1">
+                                    <div class="w-2 h-2 rounded-full" style="background-color: ${p.color.hex}; box-shadow: 0 0 5px ${p.color.hex}"></div>
+                                    <span id="status-text-${p.id}" class="text-[10px] uppercase font-bold text-slate-500">Online</span>
+                                </div>
+                            </div>
+                            <div id="score-${p.id}" class="text-3xl font-black font-mono tracking-tighter leading-none text-white transition-all">100</div>
+                        </div>
+
+                        <!-- Action Buttons -->
+                        <div id="actions-normal-${p.id}" class="flex gap-2 mt-2">
+                             <button class="flex-1 bg-slate-800 border border-slate-700 text-red-500 rounded-lg py-3 flex items-center justify-center active:scale-95"
+                                onmousedown="startLongPress(event, ${p.id}, 'remove')" onmouseup="endLongPress(event, ${p.id}, 'remove')" ontouchstart="startLongPress(event, ${p.id}, 'remove')" ontouchend="endLongPress(event, ${p.id}, 'remove')">
+                                <i data-lucide="minus" class="w-5 h-5"></i>
+                             </button>
+                             <button class="flex-1 bg-slate-800 border border-slate-700 text-green-500 rounded-lg py-3 flex items-center justify-center active:scale-95"
+                                onmousedown="startLongPress(event, ${p.id}, 'add')" onmouseup="endLongPress(event, ${p.id}, 'add')" ontouchstart="startLongPress(event, ${p.id}, 'add')" ontouchend="endLongPress(event, ${p.id}, 'add')">
+                                <i data-lucide="plus" class="w-5 h-5"></i>
+                             </button>
+                        </div>
+                        <div id="actions-attack-${p.id}" class="mt-2 py-3 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center justify-center text-red-400 text-xs font-bold uppercase tracking-widest pointer-events-none hidden">
+                            <i data-lucide="target" class="w-4 h-4 mr-2"></i> Selecionar
+                        </div>
+                    `;
+                    grid.appendChild(card);
+                    card.onclick = () => handleCardClick(p.id);
+                }
+
+                // Update Dynamic Properties (Classes & Text)
+                const isEliminated = p.status === 'ELIMINATED';
+                const isLeader = (p.id === leaderId) && !isEliminated;
+
+                // Base Styles - Darker when eliminated, Neon when attacking
+                card.className = `relative p-4 rounded-xl border-2 transition-all duration-300 flex flex-col justify-between select-none touch-manipulation ${
+                    isEliminated ? 'bg-black/60 border-slate-900 opacity-40 grayscale' : 
+                    state.attackMode ? 'bg-red-950/40 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.4)] cursor-pointer hover:scale-[1.02] animate-pulse-red' :
+                    (isLeader ? 'bg-slate-900 border-yellow-600/50 shadow-[0_0_15px_rgba(234,179,8,0.15)] z-10' : 'bg-slate-900 border-slate-800')
+                }`;
+
+                // Elements visibility
+                document.getElementById(`badge-leader-${p.id}`).classList.toggle('hidden', !isLeader || state.attackMode);
+                document.getElementById(`badge-target-${p.id}`).classList.toggle('hidden', !state.attackMode || isEliminated);
+                document.getElementById(`overlay-eliminated-${p.id}`).classList.toggle('hidden', !isEliminated);
+                
+                document.getElementById(`actions-normal-${p.id}`).classList.toggle('hidden', state.attackMode);
+                document.getElementById(`actions-attack-${p.id}`).classList.toggle('hidden', !state.attackMode);
+
+                // Text Updates (Only if value changes to avoid DOM thrashing)
+                const scoreEl = document.getElementById(`score-${p.id}`);
+                if (scoreEl.innerText != p.score) {
+                    scoreEl.innerText = p.score;
+                    scoreEl.className = `text-3xl font-black font-mono tracking-tighter leading-none transition-all ${isEliminated ? 'text-red-900' : 'text-white'}`;
+                }
+
+                // Individual Timer
+                const statusEl = document.getElementById(`status-text-${p.id}`);
+                if (isEliminated) {
+                    const timerText = `Offline - ${formatTimerDisplay(p.survivalTime)}`;
+                    if(statusEl.innerText !== timerText) statusEl.innerText = timerText;
+                } else {
+                    if(statusEl.innerText !== 'Online') statusEl.innerText = 'Online';
+                }
+
+            });
+            lucide.createIcons();
+        }
+
+        function handleCardClick(id) {
+            if (state.attackMode) {
+                const p = state.players.find(x => x.id === id);
+                if (p.status !== 'ELIMINATED') openAttackModal(id);
+            }
+        }
+
+        // --- INTERACTION LOGIC (EVENT FILTERING) ---
+
+        function updateScore(id, amount) {
+            const p = state.players.find(x => x.id === id);
+            if (!p || p.status === 'ELIMINATED') return;
+
+            p.score += amount;
+            if (p.score <= 0) {
+                p.score = 0;
+                p.status = 'ELIMINATED';
+                p.survivalTime = Date.now() - state.startTime;
+            }
+            
+            // Check Game Over
+            const active = state.players.filter(x => x.status === 'ACTIVE');
+            if (active.length <= 1 && state.players.length > 1) {
+                finishGame();
+            } else {
+                if (state.attackMode && active.length <= 1) toggleAttackMode(); // Exit attack mode if only 1 left
+                updatePlayerGrid();
+            }
+        }
+
+        // Improved Handler to avoid Double Clicks on Touch Devices
+        function startLongPress(e, id, type) {
+            if(state.attackMode) return;
+            
+            // Touch Filter
+            if (e.type === 'touchstart') {
+                ignoreMouse = true; // Set flag
+            } else if (e.type === 'mousedown' && ignoreMouse) {
+                return; // Ignore mouse event if touch just happened
+            }
+
+            isLongPress = false;
+            longPressTimeout = setTimeout(() => {
+                isLongPress = true;
+                openLongPress(id, type);
+            }, 500);
+        }
+
+        function endLongPress(e, id, type) {
+            if(state.attackMode) return;
+            
+            if (e.type === 'touchend') {
+                e.preventDefault(); // Critical: stops mouse emulation events
+            } else if (e.type === 'mouseup' && ignoreMouse) {
+                ignoreMouse = false; // Reset flag
+                return;
+            }
+
+            if (longPressTimeout) { clearTimeout(longPressTimeout); longPressTimeout = null; }
+            if (!isLongPress) {
+                // Short click
+                updateScore(id, type === 'add' ? 1 : -1);
+            }
+            isLongPress = false;
+        }
+
+        function openLongPress(id, type) {
+            state.longPress = { playerId: id, type: type };
+            document.getElementById('long-press-title').innerText = type === 'add' ? 'Adicionar Integridade' : 'Dano Crítico';
+            
+            const container = document.getElementById('long-press-buttons');
+            container.innerHTML = [5, 10, 15, 20, 25].map(val => `
+                <button onclick="applyLongPress(${val})" class="h-10 rounded-lg font-bold text-sm shadow-lg flex items-center justify-center transition-transform active:scale-95 ${type === 'add' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}">${val}</button>
+            `).join('');
+            
+            toggleModal('longPress', true);
+        }
+
+        function applyLongPress(val) {
+            const { playerId, type } = state.longPress;
+            updateScore(playerId, type === 'add' ? val : -val);
+            closeLongPress();
+        }
+
+        function closeLongPress() {
+            toggleModal('longPress', false);
+        }
+
+        // --- RULE TABS LOGIC ---
+        function switchRuleTab(tabName) {
+            // Hide all contents
+            ['overview', 'turn', 'resources', 'events'].forEach(t => {
+                document.getElementById(`rule-content-${t}`).classList.add('hidden');
+                
+                // Update buttons
+                const btn = document.getElementById(`tab-btn-${t}`);
+                if (t === tabName) {
+                    btn.classList.replace('border-transparent', 'border-green-500');
+                    btn.classList.add('text-green-400', 'bg-slate-700/30');
+                    btn.classList.remove('text-slate-400', 'hover:text-white', 'hover:bg-slate-700/50');
+                } else {
+                    btn.classList.replace('border-green-500', 'border-transparent');
+                    btn.classList.remove('text-green-400', 'bg-slate-700/30');
+                    btn.classList.add('text-slate-400', 'hover:text-white', 'hover:bg-slate-700/50');
+                }
+            });
+
+            // Show selected content
+            document.getElementById(`rule-content-${tabName}`).classList.remove('hidden');
+        }
+
+        // --- ATTACK LOGIC ---
+
+        function toggleAttackMode() {
+            state.attackMode = !state.attackMode;
+            updatePlayerGrid();
+        }
+
+        function openAttackModal(targetId) {
+            const p = state.players.find(x => x.id === targetId);
+            state.tempAttack = { targetId: targetId, baseDamage: 10, hasDefense: false };
+            
+            document.getElementById('attack-target-name').innerText = p.name;
+            document.getElementById('attack-input-damage').value = 10;
+            updateDefenseToggleUI();
+            
+            toggleModal('attack', true);
+        }
+
+        function setAttackDamage(val) {
+            state.tempAttack.baseDamage = val;
+            document.getElementById('attack-input-damage').value = val;
+        }
+
+        function toggleAttackDefense() {
+            state.tempAttack.hasDefense = !state.tempAttack.hasDefense;
+            updateDefenseToggleUI();
+        }
+
+        function updateDefenseToggleUI() {
+            const toggleBg = document.getElementById('attack-defense-toggle');
+            const toggleDot = toggleBg.firstElementChild;
+            
+            if (state.tempAttack.hasDefense) {
+                toggleBg.classList.replace('bg-slate-600', 'bg-green-500');
+                toggleDot.classList.replace('translate-x-0', 'translate-x-6');
+            } else {
+                toggleBg.classList.replace('bg-green-500', 'bg-slate-600');
+                toggleDot.classList.replace('translate-x-6', 'translate-x-0');
+            }
+        }
+
+        function getRandomMsg(key) {
+            const arr = MESSAGES[key];
+            return arr[Math.floor(Math.random() * arr.length)];
+        }
+
+        function executeAttack() {
+            const { targetId, baseDamage, hasDefense } = state.tempAttack;
+            const dmgInput = parseInt(document.getElementById('attack-input-damage').value) || 0;
+            const targetP = state.players.find(x => x.id === targetId);
+            
+            // Calc logic
+            let finalDmg = 0;
+            let msg = "";
+            let type = "";
+            const roll = Math.random() * 100;
+
+            if (!hasDefense) {
+                if (roll < 10) {
+                    finalDmg = 0;
+                    msg = getRandomMsg('noDefense_fail');
+                    type = 'info';
+                } else {
+                    const mult = 1 + (Math.random() * 0.2);
+                    finalDmg = Math.ceil(dmgInput * mult);
+                    msg = getRandomMsg('noDefense_success');
+                    type = 'danger';
+                }
+            } else {
+                if (roll < 50) {
+                    finalDmg = 0;
+                    msg = getRandomMsg('defense_block');
+                    type = 'success';
+                } else if (roll < 80) {
+                    finalDmg = Math.ceil(dmgInput * 0.10);
+                    msg = getRandomMsg('defense_low');
+                    type = 'warning';
+                } else if (roll < 95) {
+                    finalDmg = Math.ceil(dmgInput * 0.35);
+                    msg = getRandomMsg('defense_medium');
+                    type = 'warning';
+                } else {
+                    finalDmg = Math.ceil(dmgInput * 0.75);
+                    msg = getRandomMsg('defense_critical');
+                    type = 'danger';
+                }
+            }
+
+            // Apply
+            updateScore(targetId, -finalDmg);
+            toggleModal('attack', false);
+
+            // Show Result
+            const rIcon = document.getElementById('result-icon');
+            const rTarget = document.getElementById('result-target-name');
+            const rMsg = document.getElementById('result-message');
+            const rBase = document.getElementById('result-base');
+            const rActual = document.getElementById('result-actual');
+            const rDefense = document.getElementById('result-defense-status');
+            const rBar = document.getElementById('result-progress-bar');
+
+            // Colors/Icons
+            let colorCls = 'text-slate-200';
+            let iconName = 'info';
+            if(type === 'danger') { colorCls = 'text-red-500'; iconName = 'skull'; }
+            if(type === 'warning') { colorCls = 'text-orange-500'; iconName = 'alert-triangle'; }
+            if(type === 'success') { colorCls = 'text-green-500'; iconName = 'shield-check'; }
+
+            rIcon.className = `w-20 h-20 ${colorCls}`;
+            rIcon.setAttribute('data-lucide', iconName);
+            rTarget.innerText = targetP ? targetP.name : 'Alvo';
+            rMsg.innerText = msg;
+            rBase.innerText = dmgInput;
+            rActual.innerText = finalDmg;
+            rActual.className = `text-4xl font-mono font-black ${type === 'danger' || type === 'warning' ? 'text-red-500' : 'text-white'}`;
+            
+            rDefense.innerHTML = hasDefense 
+                ? `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-900/40 border border-green-500/40 text-green-400 text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(34,197,94,0.2)]"><i data-lucide="shield-check" class="w-3 h-3"></i> Defesa Ativa</div>`
+                : `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-900/40 border border-red-500/40 text-red-400 text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(239,68,68,0.2)]"><i data-lucide="shield-off" class="w-3 h-3"></i> Sem Defesa</div>`;
+
+            // Reset Animation
+            rBar.style.animation = 'none';
+            rBar.offsetHeight; /* trigger reflow */
+            rBar.style.animation = 'progress 7s linear forwards';
+
+            lucide.createIcons();
+            toggleModal('attackResult', true);
+
+            // Auto Close
+            if (resultTimeout) clearTimeout(resultTimeout);
+            resultTimeout = setTimeout(closeResultModal, 7000);
+        }
+
+        function closeResultModal() {
+            toggleModal('attackResult', false);
+            if (resultTimeout) clearTimeout(resultTimeout);
+        }
+
+        function formatTimerDisplay(ms) {
+            if (!ms) return "00:00";
+            const totalSeconds = Math.floor(ms / 1000);
+            return `${Math.floor(totalSeconds / 60).toString().padStart(2, '0')}:${(totalSeconds % 60).toString().padStart(2, '0')}`;
+        }
+
+        // Init
         init();
+
     </script>
 </body>
 </html>
