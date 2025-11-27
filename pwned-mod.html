@@ -83,7 +83,7 @@
                 confirmEnd: false,
                 longPress: { visible: false, playerId: null, type: null, x: 0, y: 0 },
                 attack: { visible: false, targetId: null, baseDamage: 10, hasDefense: false },
-                attackResult: { visible: false, message: '', type: '', base: 0, actual: 0 } // Novo estado para o resultado
+                attackResult: { visible: false, message: '', type: '', base: 0, actual: 0, targetName: '', hasDefense: false } // hasDefense adicionado
             }
         };
 
@@ -171,7 +171,6 @@
             state.attackMode = false;
             state.view = 'FINISHED';
             state.modals.confirmEnd = false;
-            // Se houver modal de resultado aberto, fecha ele
             closeResultModal();
             render();
         }
@@ -243,6 +242,10 @@
             const dmgInt = parseInt(baseDamage) || 0;
             const result = calculateAttackDamage(dmgInt, hasDefense);
 
+            // Recupera nome do alvo para exibir no modal
+            const targetPlayer = state.players.find(p => p.id === targetId);
+            const targetName = targetPlayer ? targetPlayer.name : 'Desconhecido';
+
             // Aplica o dano (negativo)
             updateScore(targetId, -result.damage);
             
@@ -255,7 +258,9 @@
                 message: result.message,
                 type: result.type,
                 base: dmgInt,
-                actual: result.damage
+                actual: result.damage,
+                targetName: targetName,
+                hasDefense: hasDefense // Salva estado da defesa
             };
 
             // Timer de 7 segundos para fechar
@@ -652,9 +657,9 @@
             </div>`;
         }
 
-        // 5. RESULT MODAL (NOVO GRANDE)
+        // 5. RESULT MODAL (NOVO GRANDE - COM NOME E STATUS DE DEFESA)
         function renderResultModal() {
-            const { message, type, base, actual } = state.modals.attackResult;
+            const { message, type, base, actual, targetName, hasDefense } = state.modals.attackResult;
             
             let colorClass = 'text-slate-200';
             let icon = 'info';
@@ -667,11 +672,22 @@
             <div class="fixed inset-0 z-[80] flex items-center justify-center bg-black/95 backdrop-blur-xl p-4 animate-fade-in">
                 <div class="w-full max-w-md flex flex-col items-center justify-center text-center animate-zoom-in">
                     
-                    <div class="mb-6 p-6 rounded-full bg-slate-900 border-4 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+                    <div class="mb-4 p-6 rounded-full bg-slate-900 border-4 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)]">
                         <i data-lucide="${icon}" class="w-20 h-20 ${colorClass}"></i>
                     </div>
 
-                    <h2 class="text-2xl font-black text-white mb-4 leading-tight">${message}</h2>
+                    <div class="mb-4">
+                         <span class="text-slate-500 text-xs font-bold uppercase tracking-widest">Alvo Atingido</span>
+                         <h3 class="text-xl font-bold text-white mt-1 mb-2">${targetName}</h3>
+                         
+                         <!-- STATUS DE DEFESA -->
+                         ${hasDefense 
+                            ? `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-900/40 border border-green-500/40 text-green-400 text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(34,197,94,0.2)]"><i data-lucide="shield-check" class="w-3 h-3"></i> Defesa Ativa</div>`
+                            : `<div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-900/40 border border-red-500/40 text-red-400 text-xs font-bold uppercase tracking-wider shadow-[0_0_10px_rgba(239,68,68,0.2)]"><i data-lucide="shield-off" class="w-3 h-3"></i> Sem Defesa</div>`
+                         }
+                    </div>
+
+                    <h2 class="text-lg font-bold text-slate-300 mb-6 leading-tight max-w-[80%]">${message}</h2>
 
                     <div class="flex items-center gap-6 mb-10 bg-slate-900/50 px-8 py-4 rounded-2xl border border-slate-800">
                         <div class="flex flex-col">
@@ -700,7 +716,6 @@
             const tab = state.activeRulesTab;
             let content = '';
             
-            // ... (Conteúdo das regras mantido igual, apenas renderizado se chamado) ...
             if (tab === 'overview') {
                 content = `
                 <div class="space-y-4 animate-slide-in">
@@ -844,6 +859,3 @@
     </script>
 </body>
 </html>
-
-
-
