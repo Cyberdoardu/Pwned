@@ -708,6 +708,10 @@
             }));
             state.startTime = null;
             state.attackMode = false;
+            
+            // Fix: Clear previous grid to prevent ghosts
+            document.getElementById('players-grid').innerHTML = '';
+            
             switchView('view-setup');
             renderColorPicker(); // Updates picker based on existing players
             updateUI(); // Shows existing list
